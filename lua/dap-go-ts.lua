@@ -165,4 +165,7 @@ M.get_root_dir = function()
   return client.config.root_dir
 end
 
+M.tests_query = tests_query
+M.get_package_name = get_package_name
+
 return M

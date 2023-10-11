@@ -4,6 +4,7 @@ local M = {
   last_testname = "",
   last_testpath = "",
   test_buildflags = "",
+  last_test_args = {},
 }
 
 local default_config = {
@@ -172,6 +173,51 @@ function M.debug_last_test()
   local msg = string.format("starting debug session '%s : %s'...", testpath, testname)
   vim.notify(msg)
   debug_test(testname, testpath, M.test_buildflags)
+
+  return true
+end
+
+function M.debug_tests_in_file()
+  local ft = vim.api.nvim_buf_get_option(0, "filetype")
+  assert(ft == "go", "can only find test in go files, not " .. ft)
+  local parser = vim.treesitter.get_parser(0)
+  local root = (parser:parse()[1]):root()
+
+  local testnames = {}
+
+  local test_query = vim.treesitter.query.parse(ft, ts.tests_query)
+  assert(test_query, "could not parse test query")
+  for _, match, _ in test_query:iter_matches(root, 0, 0, 0) do
+    for id, node in pairs(match) do
+      local capture = test_query.captures[id]
+      if capture == "testname" then
+        local name = vim.treesitter.get_node_text(node, 0)
+        table.insert(testnames, name)
+      end
+    end
+  end
+
+  require('dap.ui').pick_one(testnames, "Select test: ", function(name) return name end, function(testname)
+    local testpath = ts.get_package_name()
+    local dap = require('dap')
+    debug_test(testname, testpath, M.test_buildflags)
+
+    local label = "Debug test: "
+    -- for i, config in ipairs(dap.configurations.go) do
+    --   if config.name:sub(1, #label) == label then
+    --     table.remove(dap.configurations.go, i)
+    --   end
+    -- end
+    table.insert(dap.configurations.go, 1, {
+      type = "go",
+      name = label .. testname,
+      request = "launch",
+      mode = "test",
+      program = testpath,
+      args = { "-test.run", "^" .. testname .. "$" },
+      buildFlags = M.test_buildflags,
+    })
+  end)
 
   return true
 end

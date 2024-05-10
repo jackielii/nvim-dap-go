@@ -33,6 +33,16 @@ local function get_arguments()
   end)
 end
 
+local function getPackageName()
+  local dap = load_module("dap")
+  local path = vim.fn.input({
+    prompt = 'Path to executable: ',
+    default = vim.fn.getcwd() .. '/',
+    completion = 'file'
+  })
+  return (path and path ~= "") and path or dap.ABORT
+end
+
 local function filtered_pick_process()
   local opts = {}
   vim.ui.input(
@@ -83,6 +93,13 @@ local function setup_go_configuration(dap, configs)
       name = "Debug Package",
       request = "launch",
       program = "${fileDirname}",
+      buildFlags = configs.delve.build_flags,
+    },
+    {
+      type = "go",
+      name = "Debug Package (input)",
+      request = "launch",
+      program = getPackageName,
       buildFlags = configs.delve.build_flags,
     },
     {
@@ -178,7 +195,7 @@ function M.debug_last_test()
 end
 
 function M.debug_tests_in_file()
-  local ft = vim.api.nvim_buf_get_option(0, "filetype")
+  local ft = vim.api.nvim_get_option_value("filetype", { scope = "local" })
   assert(ft == "go", "can only find test in go files, not " .. ft)
   local parser = vim.treesitter.get_parser(0)
   local root = (parser:parse()[1]):root()
@@ -197,6 +214,7 @@ function M.debug_tests_in_file()
     end
   end
 
+  -- TODO: telescope picker + shortcut to copy test
   require('dap.ui').pick_one(testnames, "Select test: ", function(name) return name end, function(testname)
     local testpath = ts.get_package_name()
     local dap = require('dap')
@@ -217,9 +235,37 @@ function M.debug_tests_in_file()
       args = { "-test.run", "^" .. testname .. "$" },
       buildFlags = M.test_buildflags,
     })
+    -- require('dap').run({
+    --   type = "go",
+    --   name = testname,
+    --   request = "launch",
+    --   mode = "test",
+    --   program = pkg,
+    --   args = { "-test.run", "^" .. testname .. "$" },
+    --   buildFlags = M.test_buildflags,
+    -- })
   end)
 
   return true
+end
+
+function M.debug_and_insert_configuration(config)
+  local dap = require('dap')
+  if dap.configurations.go[1].name == config.name then
+    dap.run(dap.configurations.go[1])
+    return
+  end
+
+  table.insert(dap.configurations.go, 1, {
+    type = "go",
+    name = config.name,
+    request = config.request,
+    mode = config.mode,
+    program = config.program,
+    args = config.args,
+    buildFlags = M.test_buildflags,
+  })
+  dap.run(dap.configurations.go[1])
 end
 
 return M

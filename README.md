@@ -1,5 +1,15 @@
 # nvim-dap-go
 
+My fork added:
+
+- [x] go test use package name instead of file path
+- [x] yank go test command with C-y
+- [x] insert go test to launch commands
+
+
+_Original README_
+----
+
 An extension for [nvim-dap][1] providing configurations for launching go debugger (delve) and debugging individual tests.
 
 ## Features

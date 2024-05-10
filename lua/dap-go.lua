@@ -36,9 +36,9 @@ end
 local function getPackageName()
   local dap = load_module("dap")
   local path = vim.fn.input({
-    prompt = 'Path to executable: ',
-    default = vim.fn.getcwd() .. '/',
-    completion = 'file'
+    prompt = "Path to executable: ",
+    default = vim.fn.getcwd() .. "/",
+    completion = "file",
   })
   return (path and path ~= "") and path or dap.ABORT
 end
@@ -194,12 +194,21 @@ function M.debug_last_test()
   return true
 end
 
+local function testCommand(package, testname)
+  if testname:find("^Benchmark") then
+    return "go test " .. package .. " -bench '^" .. testname .. "$' -run ^XXX$ -timeout 30s -v -count 1"
+  else
+    return "go test " .. package .. " -run '^" .. testname .. "$' -timeout 30s -v -count 1"
+  end
+end
+
 function M.debug_tests_in_file()
   local ft = vim.api.nvim_get_option_value("filetype", { scope = "local" })
   assert(ft == "go", "can only find test in go files, not " .. ft)
   local parser = vim.treesitter.get_parser(0)
   local root = (parser:parse()[1]):root()
 
+  local packageName = ts.get_package_name()
   local testnames = {}
 
   local test_query = vim.treesitter.query.parse(ft, ts.tests_query)
@@ -214,43 +223,86 @@ function M.debug_tests_in_file()
     end
   end
 
-  -- TODO: telescope picker + shortcut to copy test
-  require('dap.ui').pick_one(testnames, "Select test: ", function(name) return name end, function(testname)
-    local testpath = ts.get_package_name()
-    local dap = require('dap')
-    debug_test(testname, testpath, M.test_buildflags)
+  --- picker or telescope to select test
+  --- we support further actions if telescope is available
+  local prompt = "Select test: "
+  local labelFn = function(entry)
+    return entry
+  end
+  local cb = function(testname)
+    if testname == nil then
+      return
+    end
+    debug_test(testname, packageName, M.test_buildflags)
 
-    local label = "Debug test: "
-    -- for i, config in ipairs(dap.configurations.go) do
-    --   if config.name:sub(1, #label) == label then
-    --     table.remove(dap.configurations.go, i)
-    --   end
-    -- end
+    -- save to launch configs for quick launch
+    local dap = load_module("dap")
     table.insert(dap.configurations.go, 1, {
       type = "go",
-      name = label .. testname,
+      name = "Debug test: " .. testname,
       request = "launch",
       mode = "test",
-      program = testpath,
+      program = packageName,
       args = { "-test.run", "^" .. testname .. "$" },
       buildFlags = M.test_buildflags,
     })
-    -- require('dap').run({
-    --   type = "go",
-    --   name = testname,
-    --   request = "launch",
-    --   mode = "test",
-    --   program = pkg,
-    --   args = { "-test.run", "^" .. testname .. "$" },
-    --   buildFlags = M.test_buildflags,
-    -- })
-  end)
+  end
+
+  local has_telescope, telescope = pcall(require, "telescope")
+  if has_telescope then
+    local actions = require("telescope.actions")
+    local action_state = require("telescope.actions.state")
+    local builtin = require("telescope.builtin")
+    local finders = require("telescope.finders")
+    local pickers = require("telescope.pickers")
+    local previewers = require("telescope.previewers")
+    local conf = require("telescope.config").values
+    local opts = {}
+
+    pickers
+      .new(opts, {
+        prompt_title = prompt,
+        finder = finders.new_table({
+          results = testnames,
+          entry_maker = function(entry)
+            return {
+              value = entry,
+              display = entry,
+              ordinal = entry,
+            }
+          end,
+        }),
+        sorter = conf.generic_sorter(opts),
+        attach_mappings = function(prompt_bufnr, map)
+          actions.select_default:replace(function()
+            local selection = action_state.get_selected_entry()
+            actions.close(prompt_bufnr)
+
+            cb(selection.value)
+          end)
+
+          map({ "i", "n" }, "<C-y>", function()
+            local selection = action_state.get_selected_entry()
+            local cmd = testCommand(packageName, selection.value)
+            vim.fn.setreg("+", cmd)
+            vim.fn.setreg('"', cmd)
+            actions.close(prompt_bufnr)
+            print("Copied to clipboard: " .. cmd)
+          end, { desc = "yank go test command" })
+
+          return true
+        end,
+      })
+      :find()
+  else
+    require("dap.ui").pick_one(testnames, prompt, labelFn, cb)
+  end
 
   return true
 end
 
 function M.debug_and_insert_configuration(config)
-  local dap = require('dap')
+  local dap = require("dap")
   if dap.configurations.go[1].name == config.name then
     dap.run(dap.configurations.go[1])
     return

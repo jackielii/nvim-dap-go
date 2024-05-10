@@ -133,9 +133,23 @@ local function get_closest_test()
   return get_closest_above_cursor(test_tree)
 end
 
+local function get_package_name_or_fallback(fallback)
+  local handle = io.popen("go list -f '{{.ImportPath}}' " .. fallback)
+  if handle == nil then
+    return fallback
+  end
+  local package_name = handle:read("*a")
+  if package_name == "" then
+    return fallback
+  end
+  package_name = string.gsub(package_name, "\n", "")
+  return package_name
+end
+
 local function get_package_name()
   local test_dir = vim.fn.fnamemodify(vim.fn.expand("%:.:h"), ":r")
-  return "./" .. test_dir
+  local fallback = "./" .. test_dir
+  return get_package_name_or_fallback(fallback)
 end
 
 M.closest_test = function()

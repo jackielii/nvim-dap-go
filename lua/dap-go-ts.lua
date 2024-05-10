@@ -134,12 +134,9 @@ local function get_closest_test()
 end
 
 local function get_package_name_or_fallback(fallback)
-  local handle = io.popen("go list -f '{{.ImportPath}}' " .. fallback)
-  if handle == nil then
-    return fallback
-  end
-  local package_name = handle:read("*a")
-  if package_name == "" then
+  local res = vim.system({ "go", "list", "-f", "{{.ImportPath}}", fallback }):wait()
+  local package_name = res.stdout
+  if package_name == nil or package_name == "" then
     return fallback
   end
   package_name = string.gsub(package_name, "\n", "")

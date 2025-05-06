@@ -211,16 +211,40 @@ function M.debug_tests_in_file()
   local packageName = ts.get_package_name()
   local testnames = {}
 
+  -- local test_query = vim.treesitter.query.parse(ft, ts.tests_query)
+  -- assert(test_query, "could not parse test query")
+  -- for _, match, _ in test_query:iter_matches(root, 0, 0, 0) do
+  --   for id, node in pairs(match) do
+  --     local capture = test_query.captures[id]
+  --     if capture == "testname" then
+  --       local name = vim.treesitter.get_node_text(node, 0)
+  --       table.insert(testnames, name)
+  --     end
+  --   end
+  -- end
+
+  local test_tree = {}
   local test_query = vim.treesitter.query.parse(ft, ts.tests_query)
   assert(test_query, "could not parse test query")
-  for _, match, _ in test_query:iter_matches(root, 0, 0, 0) do
-    for id, node in pairs(match) do
-      local capture = test_query.captures[id]
-      if capture == "testname" then
-        local name = vim.treesitter.get_node_text(node, 0)
-        table.insert(testnames, name)
+  for _, match, _ in test_query:iter_matches(root, 0, 0, -1, { all = true }) do
+    local test_match = {}
+    for id, nodes in pairs(match) do
+      for _, node in ipairs(nodes) do
+        local capture = test_query.captures[id]
+        if capture == "testname" then
+          local name = vim.treesitter.get_node_text(node, 0)
+          test_match.name = name
+        end
+        if capture == "parent" then
+          test_match.node = node
+        end
       end
     end
+    table.insert(test_tree, test_match)
+  end
+
+  for _, test in ipairs(test_tree) do
+    table.insert(testnames, test.name)
   end
 
   --- picker or telescope to select test
@@ -237,18 +261,23 @@ function M.debug_tests_in_file()
 
     -- save to launch configs for quick launch
     local dap = load_module("dap")
-    table.insert(dap.configurations.go, 1, {
-      type = "go",
-      name = "Debug test: " .. testname,
-      request = "launch",
-      mode = "test",
-      program = packageName,
-      args = { "-test.run", "^" .. testname .. "$" },
-      buildFlags = M.test_buildflags,
-    })
+    local name = "Debug test: " .. testname
+
+    if dap.configurations.go[1].name ~= name then
+      table.insert(dap.configurations.go, 1, {
+        type = "go",
+        name = name,
+        request = "launch",
+        mode = "test",
+        program = packageName,
+        args = { "-test.run", "^" .. testname .. "$" },
+        buildFlags = M.test_buildflags,
+      })
+    end
   end
 
   local has_telescope, telescope = pcall(require, "telescope")
+  local has_snacks, snacks = pcall(require, "snacks.picker")
   if has_telescope then
     local actions = require("telescope.actions")
     local action_state = require("telescope.actions.state")
@@ -294,6 +323,42 @@ function M.debug_tests_in_file()
         end,
       })
       :find()
+  elseif has_snacks then
+    local items = {}
+    for i, testname in ipairs(testnames) do
+      table.insert(items, { idx = i, name = testname, text = testname })
+    end
+    snacks.pick({
+      items = items,
+      title = prompt,
+      format = "text",
+      layout = { preset = "select" },
+      confirm = function(picker, item)
+        picker:close()
+        cb(item.text)
+      end,
+      win = {
+        input = {
+          keys = {
+            ["<C-y>"] = { "copy_as_go_test", mode = { "n", "i" } },
+          },
+        },
+        list = {
+          keys = {
+            ["<C-y>"] = { "copy_as_go_test", mode = { "n", "i" } },
+          },
+        },
+      },
+      actions = {
+        ["copy_as_go_test"] = function(picker, item)
+          picker:close()
+          local cmd = testCommand(packageName, item.name)
+          vim.fn.setreg("+", cmd)
+          vim.fn.setreg('"', cmd)
+          print("Copied to clipboard: " .. cmd)
+        end,
+      },
+    })
   else
     require("dap.ui").pick_one(testnames, prompt, labelFn, cb)
   end
